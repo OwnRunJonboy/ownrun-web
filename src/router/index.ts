@@ -1,0 +1,48 @@
+import { createRouter, createWebHashHistory } from 'vue-router'
+import { useAuth } from '@/auth'
+
+const router = createRouter({
+  history: createWebHashHistory(),
+  routes: [
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue'),
+      meta: { guest: true },
+    },
+    {
+      path: '/',
+      name: 'jobs',
+      component: () => import('@/views/JobsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/jobs/new',
+      name: 'new-job',
+      component: () => import('@/views/NewJobView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/jobs/:id',
+      name: 'job-detail',
+      component: () => import('@/views/JobDetailView.vue'),
+      meta: { requiresAuth: true },
+    },
+  ],
+})
+
+router.beforeEach(async (to) => {
+  const auth = useAuth()
+  while (!auth.state.ready) {
+    await new Promise((r) => setTimeout(r, 10))
+  }
+
+  if (to.meta.requiresAuth && !auth.isAuthenticated()) {
+    return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  if (to.meta.guest && auth.isAuthenticated()) {
+    return { name: 'jobs' }
+  }
+})
+
+export default router
