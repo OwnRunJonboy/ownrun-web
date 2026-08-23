@@ -1,18 +1,24 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import { useAuth } from '@/auth'
 import { ApiError } from '@/api/client'
+
+const PROJECT_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/
 
 const auth = useAuth()
 const router = useRouter()
 
 const models = ref<string[]>([])
 const profiles = ref<string[]>([])
+const knownProjects = ref<string[]>([])
 const runnerOnline = ref(false)
 const model = ref('')
 const profile = ref('workspace')
+const projectMode = ref<'existing' | 'new'>('new')
+const projectExisting = ref('')
+const projectNew = ref('')
 const prompt = ref('')
 const systemPrompt = ref('')
 const maxIterations = ref(8)
@@ -20,6 +26,28 @@ const showAdvanced = ref(false)
 const error = ref('')
 const loading = ref(false)
 const modelsLoading = ref(true)
+
+const needsProject = computed(() => profile.value === 'workspace' || profile.value === 'workspace_web')
+
+const selectedProject = computed(() => {
+  if (!needsProject.value) return ''
+  if (projectMode.value === 'existing') return projectExisting.value.trim()
+  return projectNew.value.trim()
+})
+
+const projectValid = computed(() => {
+  if (!needsProject.value) return true
+  const name = selectedProject.value
+  return name !== '' && PROJECT_RE.test(name)
+})
+
+watch(needsProject, (needed) => {
+  if (!needed) return
+  if (knownProjects.value.length && !projectExisting.value) {
+    projectExisting.value = knownProjects.value[0]
+    projectMode.value = 'existing'
+  }
+})
 
 async function loadModels() {
   const token = auth.getAccessToken()
@@ -33,6 +61,13 @@ async function loadModels() {
       : ['workspace', 'web', 'workspace_web']
     if (!profiles.value.includes(profile.value)) {
       profile.value = profiles.value[0] || 'workspace'
+    }
+    knownProjects.value = res.agent_projects ?? []
+    if (knownProjects.value.length) {
+      projectExisting.value = knownProjects.value[0]
+      projectMode.value = 'existing'
+    } else {
+      projectMode.value = 'new'
     }
     models.value = res.agent_models.length ? res.agent_models : res.models
     if (models.value.length && !model.value) {
@@ -50,6 +85,12 @@ async function submit() {
   if (!token) return
 
   error.value = ''
+  if (needsProject.value && !projectValid.value) {
+    error.value =
+      "Invalid project name: use 1–64 chars starting with a letter or digit; only letters, digits, '.', '_', and '-' allowed"
+    return
+  }
+
   loading.value = true
   try {
     const job = await api.createJob(
@@ -58,6 +99,7 @@ async function submit() {
         model: model.value,
         prompt: prompt.value,
         profile: profile.value,
+        project: needsProject.value ? selectedProject.value : undefined,
         system_prompt: systemPrompt.value || undefined,
         max_tool_iterations: maxIterations.value,
       },
@@ -110,9 +152,49 @@ onMounted(loadModels)
           <option v-for="p in profiles" :key="p" :value="p">{{ p }}</option>
         </select>
         <p class="muted">
-          <code>workspace</code> — files in the runner sandbox ·
+          <code>workspace</code> — files in a project ·
           <code>web</code> — public HTTP GET ·
           <code>workspace_web</code> — both
+        </p>
+      </div>
+
+      <div v-if="needsProject" class="form-group">
+        <label>Project</label>
+        <div style="display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 0.5rem">
+          <label style="display: flex; align-items: center; gap: 0.35rem; font-weight: normal">
+            <input v-model="projectMode" type="radio" value="existing" :disabled="knownProjects.length === 0" />
+            Existing
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.35rem; font-weight: normal">
+            <input v-model="projectMode" type="radio" value="new" />
+            New
+          </label>
+        </div>
+        <select
+          v-if="projectMode === 'existing'"
+          id="project-existing"
+          v-model="projectExisting"
+          required
+          :disabled="knownProjects.length === 0"
+        >
+          <option v-if="knownProjects.length === 0" value="">No projects yet</option>
+          <option v-for="p in knownProjects" :key="p" :value="p">{{ p }}</option>
+        </select>
+        <input
+          v-else
+          id="project-new"
+          v-model="projectNew"
+          type="text"
+          required
+          maxlength="64"
+          pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}"
+          placeholder="e.g. notes"
+          autocomplete="off"
+        />
+        <p class="muted">
+          Agent file tools only touch
+          <code>~/ownrun-workspace/&lt;project&gt;/</code>.
+          New names are created on the runner when the job starts.
         </p>
       </div>
 
@@ -146,7 +228,7 @@ onMounted(loadModels)
       <button
         type="submit"
         class="btn btn-primary"
-        :disabled="loading || !model || !prompt || !profile"
+        :disabled="loading || !model || !prompt || !profile || !projectValid"
       >
         {{ loading ? 'Submitting…' : 'Submit agent task' }}
       </button>

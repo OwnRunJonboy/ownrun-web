@@ -44,6 +44,7 @@ export interface AgentResult {
   text?: string
   model?: string
   profile?: string
+  project?: string
   duration_ms?: number
   stop_reason?: string
   iterations?: number
@@ -62,6 +63,7 @@ export interface Job {
     messages?: ChatMessage[]
     parent_job_id?: number
     profile?: string
+    project?: string
     max_tool_iterations?: number
   }
   result: AgentResult | { text?: string; model?: string; duration_ms?: number } | null
@@ -79,6 +81,7 @@ export interface ModelsResponse {
   runner_last_seen_at: string | null
   agent_profiles: string[]
   agent_models: string[]
+  agent_projects: string[]
 }
 
 class ApiError extends Error {
@@ -167,6 +170,7 @@ export const api = {
       prompt: string
       system_prompt?: string
       profile?: string
+      project?: string
       max_tool_iterations?: number
     },
     accessToken: string,

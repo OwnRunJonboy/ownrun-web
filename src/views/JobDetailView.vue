@@ -172,6 +172,7 @@ onUnmounted(() => {
       <div class="card">
         <p><strong>Model:</strong> {{ job.request.model }}</p>
         <p v-if="job.request.profile"><strong>Profile:</strong> {{ job.request.profile }}</p>
+        <p v-if="job.request.project"><strong>Project:</strong> {{ job.request.project }}</p>
         <p v-if="job.request.max_tool_iterations != null" class="muted">
           Max tool iterations: {{ job.request.max_tool_iterations }}
         </p>
