@@ -81,6 +81,7 @@ onUnmounted(() => {
           <p class="muted" style="margin: 0.35rem 0 0">
             {{ job.request?.model }} — {{ job.request?.prompt?.slice(0, 80) }}
             <template v-if="(job.request?.prompt?.length ?? 0) > 80">…</template>
+            <template v-if="job.request?.parent_job_id"> · continued</template>
           </p>
         </div>
         <span class="muted">{{ formatTime(job.created_at) }}</span>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { api, type Job } from '@/api/client'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { api, type ChatMessage, type Job } from '@/api/client'
 import { useAuth } from '@/auth'
 
 const route = useRoute()
@@ -12,10 +12,34 @@ const job = ref<Job | null>(null)
 const error = ref('')
 const actionError = ref('')
 const loading = ref(true)
+const continuePrompt = ref('')
+const continuing = ref(false)
 
 let timer: ReturnType<typeof setInterval> | null = null
 
 const jobId = () => Number(route.params.id)
+
+const systemPrompt = computed(() => {
+  const current = job.value
+  if (!current) return ''
+  if (current.request.system_prompt) return current.request.system_prompt
+  const first = current.request.messages?.[0]
+  return first?.role === 'system' ? first.content : ''
+})
+
+const turns = computed((): ChatMessage[] => {
+  const current = job.value
+  if (!current) return []
+
+  const history = current.request.messages?.length
+    ? current.request.messages.filter((m) => m.role === 'user' || m.role === 'assistant')
+    : [{ role: 'user', content: current.request.prompt }]
+
+  if (current.status === 'succeeded' && current.result?.text != null) {
+    return [...history, { role: 'assistant', content: current.result.text }]
+  }
+  return history
+})
 
 async function load() {
   const token = auth.getAccessToken()
@@ -53,9 +77,37 @@ async function requeueJob() {
   }
 }
 
+async function continueChat() {
+  const token = auth.getAccessToken()
+  if (!token || !job.value) return
+  const prompt = continuePrompt.value.trim()
+  if (!prompt) return
+
+  actionError.value = ''
+  continuing.value = true
+  try {
+    const next = await api.continueJob(job.value.id, prompt, token)
+    continuePrompt.value = ''
+    await router.push(`/jobs/${next.id}`)
+  } catch (e) {
+    actionError.value = e instanceof Error ? e.message : 'Continue failed'
+  } finally {
+    continuing.value = false
+  }
+}
+
 function formatTime(iso: string | null) {
   if (!iso) return '—'
   return new Date(iso).toLocaleString()
+}
+
+function resetAndLoad() {
+  loading.value = true
+  job.value = null
+  error.value = ''
+  actionError.value = ''
+  continuePrompt.value = ''
+  load()
 }
 
 onMounted(() => {
@@ -66,6 +118,8 @@ onMounted(() => {
     }
   }, 4000)
 })
+
+watch(() => route.params.id, resetAndLoad)
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
@@ -85,12 +139,35 @@ onUnmounted(() => {
         <span class="status" :class="`status-${job.status}`">{{ job.status }}</span>
       </h2>
 
+      <p v-if="job.request.parent_job_id" class="muted">
+        Continued from
+        <RouterLink :to="`/jobs/${job.request.parent_job_id}`">
+          job #{{ job.request.parent_job_id }}
+        </RouterLink>
+      </p>
+
       <div class="card">
         <p><strong>Model:</strong> {{ job.request.model }}</p>
-        <p><strong>Prompt:</strong></p>
-        <p style="white-space: pre-wrap; margin: 0">{{ job.request.prompt }}</p>
-        <p v-if="job.request.system_prompt" class="muted">
-          <strong>System:</strong> {{ job.request.system_prompt }}
+        <p v-if="systemPrompt" class="muted" style="white-space: pre-wrap">
+          <strong>System:</strong> {{ systemPrompt }}
+        </p>
+      </div>
+
+      <div class="chat">
+        <div
+          v-for="(turn, index) in turns"
+          :key="index"
+          class="chat-turn"
+          :class="`chat-turn-${turn.role}`"
+        >
+          <div class="chat-role">{{ turn.role }}</div>
+          <div class="chat-body">{{ turn.content }}</div>
+        </div>
+        <p
+          v-if="job.status === 'queued' || job.status === 'running'"
+          class="muted"
+        >
+          Waiting for the runner…
         </p>
       </div>
 
@@ -100,10 +177,6 @@ onUnmounted(() => {
         <dt>Started</dt><dd>{{ formatTime(job.claimed_at) }}</dd>
         <dt>Finished</dt><dd>{{ formatTime(job.finished_at) }}</dd>
       </dl>
-
-      <div v-if="job.status === 'succeeded' && job.result?.text" class="result-text">
-        {{ job.result.text }}
-      </div>
 
       <p v-if="job.status === 'failed' && job.error_message" class="error">
         {{ job.error_message }}
@@ -129,6 +202,29 @@ onUnmounted(() => {
           Requeue
         </button>
       </div>
+
+      <form
+        v-if="job.status === 'succeeded'"
+        class="continue-form"
+        @submit.prevent="continueChat"
+      >
+        <div class="form-group">
+          <label for="continue">Continue this chat</label>
+          <textarea
+            id="continue"
+            v-model="continuePrompt"
+            required
+            placeholder="Send a follow-up…"
+          />
+        </div>
+        <button
+          type="submit"
+          class="btn btn-primary"
+          :disabled="continuing || !continuePrompt.trim()"
+        >
+          {{ continuing ? 'Submitting…' : 'Continue chat' }}
+        </button>
+      </form>
     </template>
   </div>
 </template>

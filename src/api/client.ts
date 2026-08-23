@@ -26,11 +26,22 @@ export interface AuthTokens {
   expires_in: number
 }
 
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant' | string
+  content: string
+}
+
 export interface Job {
   id: number
   type: string
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
-  request: { model: string; prompt: string; system_prompt?: string }
+  request: {
+    model: string
+    prompt: string
+    system_prompt?: string
+    messages?: ChatMessage[]
+    parent_job_id?: number
+  }
   result: { text?: string; model?: string; duration_ms?: number } | null
   error_message: string | null
   created_at: string
@@ -140,6 +151,13 @@ export const api = {
 
   requeueJob(id: number, accessToken: string) {
     return request<Job>(`/jobs/${id}/requeue`, { method: 'POST' }, accessToken)
+  },
+
+  continueJob(id: number, prompt: string, accessToken: string) {
+    return request<Job>(`/jobs/${id}/continue`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    }, accessToken)
   },
 
   getModels(accessToken: string) {
