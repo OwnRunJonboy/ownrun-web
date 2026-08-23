@@ -208,3 +208,38 @@ header.app-header h1 {
   flex-wrap: wrap;
   margin-top: 1rem;
 }
+
+.job-type {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: #1e293b;
+  color: #94a3b8;
+  vertical-align: middle;
+}
+
+.trace-step {
+  margin-bottom: 0.75rem;
+}
+
+.trace-tool_call .chat-body,
+.trace-tool_result .chat-body {
+  font-size: 0.9rem;
+}
+
+.trace-args {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+}
+
+.trace-tool_result .chat-body {
+  opacity: 0.9;
+}
+

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { api, type ChatMessage, type Job } from '@/api/client'
+import { api, type AgentResult, type ChatMessage, type Job, type TraceStep } from '@/api/client'
 import { useAuth } from '@/auth'
 
 const route = useRoute()
@@ -19,6 +19,8 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 const jobId = () => Number(route.params.id)
 
+const isAgent = computed(() => job.value?.type === 'agent.task')
+
 const systemPrompt = computed(() => {
   const current = job.value
   if (!current) return ''
@@ -27,9 +29,20 @@ const systemPrompt = computed(() => {
   return first?.role === 'system' ? first.content : ''
 })
 
+const agentPayload = computed((): AgentResult | null => {
+  const current = job.value
+  if (!current || !isAgent.value) return null
+  if (current.status === 'running' || current.status === 'queued') {
+    return (current.progress as AgentResult | null) || (current.result as AgentResult | null)
+  }
+  return (current.result as AgentResult | null) || (current.progress as AgentResult | null)
+})
+
+const trace = computed((): TraceStep[] => agentPayload.value?.trace ?? [])
+
 const turns = computed((): ChatMessage[] => {
   const current = job.value
-  if (!current) return []
+  if (!current || isAgent.value) return []
 
   const history = current.request.messages?.length
     ? current.request.messages.filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -40,6 +53,15 @@ const turns = computed((): ChatMessage[] => {
   }
   return history
 })
+
+function formatArgs(args: Record<string, unknown> | undefined) {
+  if (!args) return ''
+  try {
+    return JSON.stringify(args, null, 2)
+  } catch {
+    return String(args)
+  }
+}
 
 async function load() {
   const token = auth.getAccessToken()
@@ -136,6 +158,7 @@ onUnmounted(() => {
     <template v-else-if="job">
       <h2>
         Job #{{ job.id }}
+        <span class="job-type">{{ isAgent ? 'agent' : 'chat' }}</span>
         <span class="status" :class="`status-${job.status}`">{{ job.status }}</span>
       </h2>
 
@@ -148,12 +171,23 @@ onUnmounted(() => {
 
       <div class="card">
         <p><strong>Model:</strong> {{ job.request.model }}</p>
+        <p v-if="job.request.profile"><strong>Profile:</strong> {{ job.request.profile }}</p>
+        <p v-if="job.request.max_tool_iterations != null" class="muted">
+          Max tool iterations: {{ job.request.max_tool_iterations }}
+        </p>
+        <p v-if="agentPayload?.stop_reason && agentPayload.stop_reason !== 'completed'" class="muted">
+          Stopped: {{ agentPayload.stop_reason }}
+          <template v-if="agentPayload.iterations != null">
+            · {{ agentPayload.iterations }} tool call(s)
+          </template>
+        </p>
         <p v-if="systemPrompt" class="muted" style="white-space: pre-wrap">
           <strong>System:</strong> {{ systemPrompt }}
         </p>
       </div>
 
-      <div class="chat">
+      <!-- Chat transcript -->
+      <div v-if="!isAgent" class="chat">
         <div
           v-for="(turn, index) in turns"
           :key="index"
@@ -171,6 +205,42 @@ onUnmounted(() => {
         </p>
       </div>
 
+      <!-- Agent trace -->
+      <div v-else class="trace">
+        <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem">Trace</h3>
+        <div
+          v-for="(step, index) in trace"
+          :key="index"
+          class="trace-step"
+          :class="`trace-${step.kind}`"
+        >
+          <div class="chat-role">
+            <template v-if="step.kind === 'tool_call'">tool · {{ step.name }}</template>
+            <template v-else-if="step.kind === 'tool_result'">
+              result · {{ step.name }}
+              <span v-if="step.ok === false" class="error"> (error)</span>
+            </template>
+            <template v-else-if="step.kind === 'user'">user</template>
+            <template v-else>{{ step.source || 'assistant' }}</template>
+          </div>
+          <div class="chat-body">
+            <pre v-if="step.kind === 'tool_call'" class="trace-args">{{ formatArgs(step.args) }}</pre>
+            <template v-else>{{ step.content }}</template>
+          </div>
+        </div>
+        <p
+          v-if="(job.status === 'queued' || job.status === 'running') && trace.length === 0"
+          class="muted"
+        >
+          Waiting for the runner…
+        </p>
+        <div v-if="agentPayload?.text && job.status === 'succeeded'" class="result-text" style="margin-top: 1rem">
+          <strong>Final answer</strong>
+          <div style="margin-top: 0.5rem">{{ agentPayload.text }}</div>
+        </div>
+        <p v-if="agentPayload?.trace_truncated" class="muted">Trace was truncated to fit storage limits.</p>
+      </div>
+
       <dl class="muted" style="display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 1rem">
         <dt>Created</dt><dd>{{ formatTime(job.created_at) }}</dd>
         <dt>Queued</dt><dd>{{ formatTime(job.queued_at) }}</dd>
@@ -186,7 +256,7 @@ onUnmounted(() => {
 
       <div class="actions">
         <button
-          v-if="job.status === 'queued'"
+          v-if="job.status === 'queued' || job.status === 'running'"
           type="button"
           class="btn btn-danger"
           @click="cancelJob"
@@ -209,12 +279,12 @@ onUnmounted(() => {
         @submit.prevent="continueChat"
       >
         <div class="form-group">
-          <label for="continue">Continue this chat</label>
+          <label for="continue">{{ isAgent ? 'Continue this task' : 'Continue this chat' }}</label>
           <textarea
             id="continue"
             v-model="continuePrompt"
             required
-            placeholder="Send a follow-up…"
+            :placeholder="isAgent ? 'Send a follow-up task…' : 'Send a follow-up…'"
           />
         </div>
         <button
@@ -222,7 +292,7 @@ onUnmounted(() => {
           class="btn btn-primary"
           :disabled="continuing || !continuePrompt.trim()"
         >
-          {{ continuing ? 'Submitting…' : 'Continue chat' }}
+          {{ continuing ? 'Submitting…' : isAgent ? 'Continue task' : 'Continue chat' }}
         </button>
       </form>
     </template>

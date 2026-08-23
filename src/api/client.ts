@@ -31,6 +31,26 @@ export interface ChatMessage {
   content: string
 }
 
+export interface TraceStep {
+  kind: 'user' | 'tool_call' | 'tool_result' | 'message' | string
+  content?: string
+  name?: string
+  args?: Record<string, unknown>
+  ok?: boolean
+  source?: string
+}
+
+export interface AgentResult {
+  text?: string
+  model?: string
+  profile?: string
+  duration_ms?: number
+  stop_reason?: string
+  iterations?: number
+  trace?: TraceStep[]
+  trace_truncated?: boolean
+}
+
 export interface Job {
   id: number
   type: string
@@ -41,8 +61,11 @@ export interface Job {
     system_prompt?: string
     messages?: ChatMessage[]
     parent_job_id?: number
+    profile?: string
+    max_tool_iterations?: number
   }
-  result: { text?: string; model?: string; duration_ms?: number } | null
+  result: AgentResult | { text?: string; model?: string; duration_ms?: number } | null
+  progress: AgentResult | null
   error_message: string | null
   created_at: string
   queued_at: string
@@ -54,6 +77,8 @@ export interface ModelsResponse {
   models: string[]
   runner_online: boolean
   runner_last_seen_at: string | null
+  agent_profiles: string[]
+  agent_models: string[]
 }
 
 class ApiError extends Error {
@@ -136,7 +161,14 @@ export const api = {
   },
 
   createJob(
-    data: { model: string; prompt: string; system_prompt?: string },
+    data: {
+      type?: 'ollama.chat' | 'agent.task'
+      model: string
+      prompt: string
+      system_prompt?: string
+      profile?: string
+      max_tool_iterations?: number
+    },
     accessToken: string,
   ) {
     return request<Job>('/jobs', {

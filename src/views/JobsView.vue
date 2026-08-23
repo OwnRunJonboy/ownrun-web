@@ -36,6 +36,10 @@ function formatTime(iso: string | null) {
   return new Date(iso).toLocaleString()
 }
 
+function typeLabel(type: string) {
+  return type === 'agent.task' ? 'agent' : 'chat'
+}
+
 onMounted(() => {
   load()
   timer = setInterval(load, 8000)
@@ -62,7 +66,9 @@ onUnmounted(() => {
     <p v-else-if="loading" class="muted">Loading…</p>
     <p v-else-if="jobs.length === 0" class="muted">
       No jobs yet.
-      <RouterLink to="/jobs/new">Create one</RouterLink>
+      <RouterLink to="/jobs/new">Create a chat</RouterLink>
+      or
+      <RouterLink to="/jobs/new-agent">an agent task</RouterLink>.
     </p>
 
     <RouterLink
@@ -75,11 +81,14 @@ onUnmounted(() => {
       <div style="display: flex; justify-content: space-between; align-items: start; gap: 1rem">
         <div>
           <strong>#{{ job.id }}</strong>
+          <span class="job-type">{{ typeLabel(job.type) }}</span>
           <span class="status" :class="`status-${job.status}`" style="margin-left: 0.5rem">
             {{ job.status }}
           </span>
           <p class="muted" style="margin: 0.35rem 0 0">
-            {{ job.request?.model }} — {{ job.request?.prompt?.slice(0, 80) }}
+            {{ job.request?.model }}
+            <template v-if="job.request?.profile"> · {{ job.request.profile }}</template>
+            — {{ job.request?.prompt?.slice(0, 80) }}
             <template v-if="(job.request?.prompt?.length ?? 0) > 80">…</template>
             <template v-if="job.request?.parent_job_id"> · continued</template>
           </p>

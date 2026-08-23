@@ -23,6 +23,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/jobs/new-agent',
+      name: 'new-agent',
+      component: () => import('@/views/NewAgentView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/jobs/:id',
       name: 'job-detail',
       component: () => import('@/views/JobDetailView.vue'),
