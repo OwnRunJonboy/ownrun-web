@@ -82,6 +82,28 @@ export interface ModelsResponse {
   agent_profiles: string[]
   agent_models: string[]
   agent_projects: string[]
+  calendar_projects?: string[]
+  timezone?: string
+}
+
+export interface CalendarEntry {
+  id: number
+  title: string
+  description?: string | null
+  starts_at: string
+  ends_at: string | null
+  all_day: boolean
+  project: string | null
+  created_by?: 'user' | 'agent' | string
+  created_job_id?: number | null
+  updated_job_id?: number | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface CalendarListResponse {
+  entries: CalendarEntry[]
+  truncated: boolean
 }
 
 class ApiError extends Error {
@@ -198,6 +220,60 @@ export const api = {
 
   getModels(accessToken: string) {
     return request<ModelsResponse>('/models', {}, accessToken)
+  },
+
+  listCalendar(
+    params: { from: string; to: string; project?: string },
+    accessToken: string,
+  ) {
+    const q = new URLSearchParams({ from: params.from, to: params.to })
+    if (params.project !== undefined) {
+      q.set('project', params.project)
+    }
+    return request<CalendarListResponse>(`/calendar?${q.toString()}`, {}, accessToken)
+  },
+
+  getCalendarEntry(id: number, accessToken: string) {
+    return request<CalendarEntry>(`/calendar/${id}`, {}, accessToken)
+  },
+
+  createCalendarEntry(
+    data: {
+      title: string
+      starts_at: string
+      ends_at?: string | null
+      all_day?: boolean
+      description?: string | null
+      project?: string | null
+    },
+    accessToken: string,
+  ) {
+    return request<CalendarEntry>('/calendar', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, accessToken)
+  },
+
+  updateCalendarEntry(
+    id: number,
+    data: {
+      title?: string
+      starts_at?: string
+      ends_at?: string | null
+      all_day?: boolean
+      description?: string | null
+      project?: string | null
+    },
+    accessToken: string,
+  ) {
+    return request<CalendarEntry>(`/calendar/${id}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, accessToken)
+  },
+
+  deleteCalendarEntry(id: number, accessToken: string) {
+    return request<{ ok: boolean; id: number }>(`/calendar/${id}/delete`, { method: 'POST' }, accessToken)
   },
 }
 
