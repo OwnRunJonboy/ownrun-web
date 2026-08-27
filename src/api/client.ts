@@ -83,6 +83,7 @@ export interface ModelsResponse {
   agent_models: string[]
   agent_projects: string[]
   calendar_projects?: string[]
+  journal_projects?: string[]
   timezone?: string
 }
 
@@ -104,6 +105,32 @@ export interface CalendarEntry {
 export interface CalendarListResponse {
   entries: CalendarEntry[]
   truncated: boolean
+}
+
+export interface JournalEntry {
+  id: number
+  title: string | null
+  body: string
+  entry_date: string
+  project: string | null
+  created_by?: 'user' | 'agent' | string
+  created_job_id?: number | null
+  updated_job_id?: number | null
+  created_at?: string
+  updated_at?: string
+  body_truncated?: boolean
+}
+
+export interface JournalListResponse {
+  entries: JournalEntry[]
+  truncated: boolean
+  next?: { before_date: string; before_id: number }
+}
+
+export interface JournalMemoryResponse {
+  entry: JournalEntry | null
+  memory_kind: 'anniversary_10y' | 'anniversary_1y' | 'anniversary_1m' | 'random' | null
+  memory_label: string | null
 }
 
 class ApiError extends Error {
@@ -274,6 +301,73 @@ export const api = {
 
   deleteCalendarEntry(id: number, accessToken: string) {
     return request<{ ok: boolean; id: number }>(`/calendar/${id}/delete`, { method: 'POST' }, accessToken)
+  },
+
+  listJournal(
+    params: {
+      project?: string
+      q?: string
+      limit?: number
+      before_date?: string
+      before_id?: number
+      from?: string
+      to?: string
+    },
+    accessToken: string,
+  ) {
+    const q = new URLSearchParams()
+    if (params.project !== undefined) q.set('project', params.project)
+    if (params.q) q.set('q', params.q)
+    if (params.limit !== undefined) q.set('limit', String(params.limit))
+    if (params.before_date) q.set('before_date', params.before_date)
+    if (params.before_id !== undefined) q.set('before_id', String(params.before_id))
+    if (params.from) q.set('from', params.from)
+    if (params.to) q.set('to', params.to)
+    const qs = q.toString()
+    return request<JournalListResponse>(`/journal${qs ? `?${qs}` : ''}`, {}, accessToken)
+  },
+
+  getJournalMemory(accessToken: string) {
+    return request<JournalMemoryResponse>('/journal/memory', {}, accessToken)
+  },
+
+  getJournalEntry(id: number, accessToken: string) {
+    return request<JournalEntry>(`/journal/${id}`, {}, accessToken)
+  },
+
+  createJournalEntry(
+    data: {
+      body: string
+      title?: string | null
+      entry_date?: string | null
+      project?: string | null
+    },
+    accessToken: string,
+  ) {
+    return request<JournalEntry>('/journal', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, accessToken)
+  },
+
+  updateJournalEntry(
+    id: number,
+    data: {
+      body?: string
+      title?: string | null
+      entry_date?: string | null
+      project?: string | null
+    },
+    accessToken: string,
+  ) {
+    return request<JournalEntry>(`/journal/${id}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, accessToken)
+  },
+
+  deleteJournalEntry(id: number, accessToken: string) {
+    return request<{ ok: boolean; id: number }>(`/journal/${id}/delete`, { method: 'POST' }, accessToken)
   },
 }
 

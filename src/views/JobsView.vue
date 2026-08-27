@@ -1,34 +1,68 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
-import { api, type Job } from '@/api/client'
+import { RouterLink, useRouter } from 'vue-router'
+import { api, type Job, type JournalEntry } from '@/api/client'
 import { useAuth } from '@/auth'
 
 const auth = useAuth()
+const router = useRouter()
 const jobs = ref<Job[]>([])
 const runnerOnline = ref(false)
 const error = ref('')
 const loading = ref(true)
+const memoryEntry = ref<JournalEntry | null>(null)
+const memoryLabel = ref<string | null>(null)
 
 let timer: ReturnType<typeof setInterval> | null = null
+
+const MEMORY_EXCERPT = 280
+
+function memoryExcerpt(body: string): string {
+  const text = body.replace(/\s+/g, ' ').trim()
+  if (text.length <= MEMORY_EXCERPT) return text
+  return text.slice(0, MEMORY_EXCERPT) + '…'
+}
+
+function formatMemoryDate(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(undefined, {
+    timeZone: 'UTC',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+}
 
 async function load() {
   const token = auth.getAccessToken()
   if (!token) return
 
   try {
-    const [jobsRes, modelsRes] = await Promise.all([
+    const [jobsRes, modelsRes, memoryRes] = await Promise.all([
       api.listJobs(token),
       api.getModels(token),
+      api.getJournalMemory(token).catch(() => null),
     ])
     jobs.value = jobsRes.jobs
     runnerOnline.value = modelsRes.runner_online
+    if (memoryRes?.entry) {
+      memoryEntry.value = memoryRes.entry
+      memoryLabel.value = memoryRes.memory_label
+    } else {
+      memoryEntry.value = null
+      memoryLabel.value = null
+    }
     error.value = ''
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load jobs'
   } finally {
     loading.value = false
   }
+}
+
+function openMemory() {
+  if (!memoryEntry.value) return
+  void router.push({ name: 'journal', query: { highlight: String(memoryEntry.value.id) } })
 }
 
 function formatTime(iso: string | null) {
@@ -61,6 +95,21 @@ onUnmounted(() => {
         Runner {{ runnerOnline ? 'online' : 'offline' }}
       </span>
     </div>
+
+    <button
+      v-if="memoryEntry"
+      type="button"
+      class="card journal-memory"
+      @click="openMemory"
+    >
+      <div class="journal-memory-label">{{ memoryLabel || 'From your journal' }}</div>
+      <div class="muted" style="font-size: 0.85rem">{{ formatMemoryDate(memoryEntry.entry_date) }}</div>
+      <strong v-if="memoryEntry.title" style="display: block; margin-top: 0.35rem">
+        {{ memoryEntry.title }}
+      </strong>
+      <p style="margin: 0.35rem 0 0">{{ memoryExcerpt(memoryEntry.body) }}</p>
+      <span class="muted" style="font-size: 0.8rem">Open in Journal →</span>
+    </button>
 
     <p v-if="error" class="error">{{ error }}</p>
     <p v-else-if="loading" class="muted">Loading…</p>
