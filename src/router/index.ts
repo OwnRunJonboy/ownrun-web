@@ -23,6 +23,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/prompts',
+      name: 'prompts',
+      component: () => import('@/views/PromptsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/',
       name: 'jobs',
       component: () => import('@/views/JobsView.vue'),

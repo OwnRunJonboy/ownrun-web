@@ -4,6 +4,8 @@ import { useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import { useAuth } from '@/auth'
 import { ApiError } from '@/api/client'
+import SystemPromptField from '@/components/SystemPromptField.vue'
+import { unionProjects } from '@/composables/useSystemPrompts'
 
 const PROJECT_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/
 
@@ -54,7 +56,10 @@ async function loadModels() {
   if (!token) return
 
   try {
-    const res = await api.getModels(token)
+    const [res, promptsRes] = await Promise.all([
+      api.getModels(token),
+      api.listSystemPrompts(token).catch(() => null),
+    ])
     runnerOnline.value = res.runner_online
     profiles.value = res.agent_profiles.length
       ? res.agent_profiles
@@ -62,7 +67,10 @@ async function loadModels() {
     if (!profiles.value.includes(profile.value)) {
       profile.value = profiles.value[0] || 'workspace'
     }
-    knownProjects.value = res.agent_projects ?? []
+    knownProjects.value = unionProjects(
+      res.agent_projects ?? [],
+      promptsRes?.project_defaults ?? [],
+    )
     if (knownProjects.value.length) {
       projectExisting.value = knownProjects.value[0]
       projectMode.value = 'existing'
@@ -208,10 +216,11 @@ onMounted(loadModels)
         />
       </div>
 
-      <div class="form-group">
-        <label for="system">System prompt (optional)</label>
-        <textarea id="system" v-model="systemPrompt" placeholder="Extra instructions for the agent…" />
-      </div>
+      <SystemPromptField
+        v-model="systemPrompt"
+        job-kind="agent"
+        :project="needsProject ? selectedProject : undefined"
+      />
 
       <p>
         <a href="#" class="muted" @click.prevent="showAdvanced = !showAdvanced">

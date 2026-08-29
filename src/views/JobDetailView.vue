@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { api, type AgentResult, type ChatMessage, type Job, type TraceStep } from '@/api/client'
 import { useAuth } from '@/auth'
+import { ApiError, saveSystemPrompt } from '@/composables/useSystemPrompts'
 
 const route = useRoute()
 const router = useRouter()
@@ -14,6 +15,11 @@ const actionError = ref('')
 const loading = ref(true)
 const continuePrompt = ref('')
 const continuing = ref(false)
+const savePromptName = ref('')
+const savePromptError = ref('')
+const savePromptOk = ref('')
+const savingPrompt = ref(false)
+const showSavePrompt = ref(false)
 
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -118,6 +124,29 @@ async function continueChat() {
   }
 }
 
+async function savePromptToLibrary() {
+  const name = savePromptName.value.trim()
+  const body = systemPrompt.value.trim()
+  if (!name || !body) {
+    savePromptError.value = 'Name is required'
+    return
+  }
+  savePromptError.value = ''
+  savePromptOk.value = ''
+  savingPrompt.value = true
+  try {
+    const applies = isAgent.value ? 'agent' : 'chat'
+    await saveSystemPrompt(name, body, applies === 'agent' ? 'agent' : 'chat')
+    savePromptOk.value = 'Saved to library'
+    savePromptName.value = ''
+    showSavePrompt.value = false
+  } catch (e) {
+    savePromptError.value = e instanceof ApiError ? e.message : 'Failed to save prompt'
+  } finally {
+    savingPrompt.value = false
+  }
+}
+
 function formatTime(iso: string | null) {
   if (!iso) return '—'
   return new Date(iso).toLocaleString()
@@ -185,6 +214,32 @@ onUnmounted(() => {
         <p v-if="systemPrompt" class="muted" style="white-space: pre-wrap">
           <strong>System:</strong> {{ systemPrompt }}
         </p>
+        <div v-if="systemPrompt" style="margin-top: 0.5rem">
+          <button
+            v-if="!showSavePrompt"
+            type="button"
+            class="btn"
+            @click="showSavePrompt = true"
+          >
+            Save to library
+          </button>
+          <div v-else class="prompt-save-as">
+            <input
+              v-model="savePromptName"
+              type="text"
+              maxlength="80"
+              placeholder="Prompt name"
+              autocomplete="off"
+              style="margin-right: 0.5rem"
+            />
+            <button type="button" class="btn" :disabled="savingPrompt" @click="savePromptToLibrary">
+              {{ savingPrompt ? 'Saving…' : 'Save' }}
+            </button>
+            <button type="button" class="btn" @click="showSavePrompt = false">Cancel</button>
+            <p v-if="savePromptError" class="error" style="margin-top: 0.35rem">{{ savePromptError }}</p>
+            <p v-if="savePromptOk" class="muted" style="margin-top: 0.35rem">{{ savePromptOk }}</p>
+          </div>
+        </div>
       </div>
 
       <!-- Chat transcript -->

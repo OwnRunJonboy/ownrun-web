@@ -133,6 +133,34 @@ export interface JournalMemoryResponse {
   memory_label: string | null
 }
 
+export type SystemPromptAppliesTo = 'chat' | 'agent' | 'both'
+
+export interface SystemPrompt {
+  id: number
+  name: string
+  body: string
+  applies_to: SystemPromptAppliesTo
+  created_at: string
+  updated_at: string
+}
+
+export interface SystemPromptDefaults {
+  chat_prompt_id: number | null
+  agent_prompt_id: number | null
+}
+
+export interface ProjectPromptDefaults {
+  project: string
+  chat_prompt_id: number | null
+  agent_prompt_id: number | null
+}
+
+export interface SystemPromptBundle {
+  prompts: SystemPrompt[]
+  defaults: SystemPromptDefaults
+  project_defaults: ProjectPromptDefaults[]
+}
+
 class ApiError extends Error {
   constructor(
     message: string,
@@ -368,6 +396,72 @@ export const api = {
 
   deleteJournalEntry(id: number, accessToken: string) {
     return request<{ ok: boolean; id: number }>(`/journal/${id}/delete`, { method: 'POST' }, accessToken)
+  },
+
+  listSystemPrompts(accessToken: string) {
+    return request<SystemPromptBundle>('/system-prompts', {}, accessToken)
+  },
+
+  getSystemPrompt(id: number, accessToken: string) {
+    return request<SystemPrompt>(`/system-prompts/${id}`, {}, accessToken)
+  },
+
+  createSystemPrompt(
+    data: { name: string; body: string; applies_to?: SystemPromptAppliesTo },
+    accessToken: string,
+  ) {
+    return request<SystemPrompt>('/system-prompts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, accessToken)
+  },
+
+  updateSystemPrompt(
+    id: number,
+    data: Partial<{ name: string; body: string; applies_to: SystemPromptAppliesTo }>,
+    accessToken: string,
+  ) {
+    return request<SystemPrompt>(`/system-prompts/${id}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, accessToken)
+  },
+
+  deleteSystemPrompt(id: number, accessToken: string) {
+    return request<{ ok: boolean; id: number }>(`/system-prompts/${id}/delete`, { method: 'POST' }, accessToken)
+  },
+
+  setSystemPromptDefaults(
+    data: Partial<{ chat_prompt_id: number | null; agent_prompt_id: number | null }>,
+    accessToken: string,
+  ) {
+    return request<SystemPromptDefaults>('/system-prompts/defaults', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }, accessToken)
+  },
+
+  setProjectPromptDefaults(
+    project: string,
+    data: Partial<{ chat_prompt_id: number | null; agent_prompt_id: number | null }>,
+    accessToken: string,
+  ) {
+    return request<ProjectPromptDefaults>(
+      `/system-prompts/defaults/projects/${encodeURIComponent(project)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+      accessToken,
+    )
+  },
+
+  deleteProjectPromptDefaults(project: string, accessToken: string) {
+    return request<{ ok: boolean; project: string }>(
+      `/system-prompts/defaults/projects/${encodeURIComponent(project)}`,
+      { method: 'DELETE' },
+      accessToken,
+    )
   },
 }
 
