@@ -23,6 +23,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/tasks',
+      name: 'tasks',
+      component: () => import('@/views/TasksView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/prompts',
       name: 'prompts',
       component: () => import('@/views/PromptsView.vue'),

@@ -84,6 +84,7 @@ export interface ModelsResponse {
   agent_projects: string[]
   calendar_projects?: string[]
   journal_projects?: string[]
+  task_projects?: string[]
   timezone?: string
 }
 
@@ -131,6 +132,39 @@ export interface JournalMemoryResponse {
   entry: JournalEntry | null
   memory_kind: 'anniversary_10y' | 'anniversary_1y' | 'anniversary_1m' | 'random' | null
   memory_label: string | null
+}
+
+export type TaskPriority = 'high' | 'normal' | 'low'
+export type TaskStatus = 'todo' | 'in_progress' | 'finished' | 'deleted'
+
+export interface Task {
+  id: number
+  name: string
+  description: string | null
+  due_date: string | null
+  project: string | null
+  priority: TaskPriority
+  status: TaskStatus
+  created_by?: 'user' | 'agent' | string
+  created_job_id?: number | null
+  updated_job_id?: number | null
+  created_at?: string
+  updated_at?: string
+  description_truncated?: boolean
+}
+
+export interface TaskListResponse {
+  tasks: Task[]
+  truncated: boolean
+  total: number
+}
+
+export interface TaskDueResponse {
+  today: string
+  overdue: number
+  due_today: number
+  open: number
+  tasks: Task[]
 }
 
 export type SystemPromptAppliesTo = 'chat' | 'agent' | 'both'
@@ -398,6 +432,79 @@ export const api = {
     return request<{ ok: boolean; id: number }>(`/journal/${id}/delete`, { method: 'POST' }, accessToken)
   },
 
+  listTasks(
+    params: {
+      project?: string
+      status?: string
+      priority?: string
+      q?: string
+      due_from?: string
+      due_to?: string
+      limit?: number
+      offset?: number
+    },
+    accessToken: string,
+  ) {
+    const q = new URLSearchParams()
+    if (params.project !== undefined) q.set('project', params.project)
+    if (params.status) q.set('status', params.status)
+    if (params.priority) q.set('priority', params.priority)
+    if (params.q) q.set('q', params.q)
+    if (params.due_from) q.set('due_from', params.due_from)
+    if (params.due_to) q.set('due_to', params.due_to)
+    if (params.limit !== undefined) q.set('limit', String(params.limit))
+    if (params.offset !== undefined) q.set('offset', String(params.offset))
+    const qs = q.toString()
+    return request<TaskListResponse>(`/tasks${qs ? `?${qs}` : ''}`, {}, accessToken)
+  },
+
+  getTasksDue(accessToken: string) {
+    return request<TaskDueResponse>('/tasks/due', {}, accessToken)
+  },
+
+  getTask(id: number, accessToken: string) {
+    return request<Task>(`/tasks/${id}`, {}, accessToken)
+  },
+
+  createTask(
+    data: {
+      name: string
+      description?: string | null
+      due_date?: string | null
+      project?: string | null
+      priority?: TaskPriority
+      status?: Exclude<TaskStatus, 'deleted'>
+    },
+    accessToken: string,
+  ) {
+    return request<Task>('/tasks', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, accessToken)
+  },
+
+  updateTask(
+    id: number,
+    data: {
+      name?: string
+      description?: string | null
+      due_date?: string | null
+      project?: string | null
+      priority?: TaskPriority
+      status?: TaskStatus
+    },
+    accessToken: string,
+  ) {
+    return request<Task>(`/tasks/${id}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, accessToken)
+  },
+
+  deleteTask(id: number, accessToken: string) {
+    return request<{ ok: boolean; id: number }>(`/tasks/${id}/delete`, { method: 'POST' }, accessToken)
+  },
+
   listSystemPrompts(accessToken: string) {
     return request<SystemPromptBundle>('/system-prompts', {}, accessToken)
   },
@@ -436,7 +543,7 @@ export const api = {
     accessToken: string,
   ) {
     return request<SystemPromptDefaults>('/system-prompts/defaults', {
-      method: 'PUT',
+      method: 'POST',
       body: JSON.stringify(data),
     }, accessToken)
   },
@@ -449,7 +556,7 @@ export const api = {
     return request<ProjectPromptDefaults>(
       `/system-prompts/defaults/projects/${encodeURIComponent(project)}`,
       {
-        method: 'PUT',
+        method: 'POST',
         body: JSON.stringify(data),
       },
       accessToken,
@@ -458,8 +565,8 @@ export const api = {
 
   deleteProjectPromptDefaults(project: string, accessToken: string) {
     return request<{ ok: boolean; project: string }>(
-      `/system-prompts/defaults/projects/${encodeURIComponent(project)}`,
-      { method: 'DELETE' },
+      `/system-prompts/defaults/projects/${encodeURIComponent(project)}/delete`,
+      { method: 'POST' },
       accessToken,
     )
   },

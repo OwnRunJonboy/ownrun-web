@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
-import { api, type Job, type JournalEntry } from '@/api/client'
+import { api, type Job, type JournalEntry, type Task } from '@/api/client'
 import { useAuth } from '@/auth'
 
 const auth = useAuth()
@@ -12,6 +12,9 @@ const error = ref('')
 const loading = ref(true)
 const memoryEntry = ref<JournalEntry | null>(null)
 const memoryLabel = ref<string | null>(null)
+const dueOverdue = ref(0)
+const dueTodayCount = ref(0)
+const dueTasks = ref<Task[]>([])
 
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -38,10 +41,11 @@ async function load() {
   if (!token) return
 
   try {
-    const [jobsRes, modelsRes, memoryRes] = await Promise.all([
+    const [jobsRes, modelsRes, memoryRes, dueRes] = await Promise.all([
       api.listJobs(token),
       api.getModels(token),
       api.getJournalMemory(token).catch(() => null),
+      api.getTasksDue(token).catch(() => null),
     ])
     jobs.value = jobsRes.jobs
     runnerOnline.value = modelsRes.runner_online
@@ -51,6 +55,15 @@ async function load() {
     } else {
       memoryEntry.value = null
       memoryLabel.value = null
+    }
+    if (dueRes && (dueRes.overdue > 0 || dueRes.due_today > 0)) {
+      dueOverdue.value = dueRes.overdue
+      dueTodayCount.value = dueRes.due_today
+      dueTasks.value = dueRes.tasks
+    } else {
+      dueOverdue.value = 0
+      dueTodayCount.value = 0
+      dueTasks.value = []
     }
     error.value = ''
   } catch (e) {
@@ -63,6 +76,17 @@ async function load() {
 function openMemory() {
   if (!memoryEntry.value) return
   void router.push({ name: 'journal', query: { highlight: String(memoryEntry.value.id) } })
+}
+
+function dueCountLabel(): string {
+  const parts: string[] = []
+  if (dueOverdue.value > 0) {
+    parts.push(`${dueOverdue.value} overdue`)
+  }
+  if (dueTodayCount.value > 0) {
+    parts.push(`${dueTodayCount.value} due today`)
+  }
+  return parts.join(' · ')
 }
 
 function formatTime(iso: string | null) {
@@ -95,6 +119,24 @@ onUnmounted(() => {
         Runner {{ runnerOnline ? 'online' : 'offline' }}
       </span>
     </div>
+
+    <RouterLink
+      v-if="dueOverdue > 0 || dueTodayCount > 0"
+      to="/tasks"
+      class="card journal-memory"
+    >
+      <div class="journal-memory-label">Tasks</div>
+      <strong style="display: block; margin-top: 0.15rem">{{ dueCountLabel() }}</strong>
+      <p
+        v-for="task in dueTasks.slice(0, 3)"
+        :key="task.id"
+        class="muted"
+        style="margin: 0.35rem 0 0"
+      >
+        {{ task.name }}
+      </p>
+      <span class="muted" style="font-size: 0.8rem">Open Tasks →</span>
+    </RouterLink>
 
     <button
       v-if="memoryEntry"

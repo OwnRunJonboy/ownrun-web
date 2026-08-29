@@ -42,6 +42,7 @@ header.app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 1rem;
   padding: 0.75rem 0 1.25rem;
   border-bottom: 1px solid #2a3441;
@@ -443,6 +444,63 @@ header.app-header .actions {
   text-transform: uppercase;
   color: #7dd3fc;
   margin-bottom: 0.25rem;
+}
+
+a.journal-memory {
+  text-decoration: none;
+}
+
+a.journal-memory:hover {
+  text-decoration: none;
+}
+
+.task-group {
+  margin-bottom: 1.25rem;
+}
+
+.task-group-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.task-due-overdue {
+  color: #fca5a5;
+}
+
+.task-priority,
+.task-status {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #1e293b;
+  color: #94a3b8;
+}
+
+.task-priority-high {
+  background: #7f1d1d;
+  color: #fca5a5;
+}
+
+.task-priority-low {
+  color: #64748b;
+}
+
+.task-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.task-row-actions .btn {
+  padding: 0.25rem 0.65rem;
+  font-size: 0.8rem;
 }
 
 .job-type {
