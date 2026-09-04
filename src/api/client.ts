@@ -65,6 +65,7 @@ export interface Job {
     profile?: string
     project?: string
     max_tool_iterations?: number
+    disabled_tools?: string[]
   }
   result: AgentResult | { text?: string; model?: string; duration_ms?: number } | null
   progress: AgentResult | null
@@ -86,6 +87,15 @@ export interface ModelsResponse {
   journal_projects?: string[]
   task_projects?: string[]
   timezone?: string
+  web_search_available?: boolean
+  agent_tool_ids?: string[]
+  project_tool_policies?: ProjectToolPolicy[]
+}
+
+export interface ProjectToolPolicy {
+  project: string
+  disabled_tools: string[]
+  updated_at?: string
 }
 
 export interface CalendarEntry {
@@ -283,6 +293,7 @@ export const api = {
       profile?: string
       project?: string
       max_tool_iterations?: number
+      disabled_tools?: string[]
     },
     accessToken: string,
   ) {
@@ -566,6 +577,29 @@ export const api = {
   deleteProjectPromptDefaults(project: string, accessToken: string) {
     return request<{ ok: boolean; project: string }>(
       `/system-prompts/defaults/projects/${encodeURIComponent(project)}/delete`,
+      { method: 'POST' },
+      accessToken,
+    )
+  },
+
+  listProjectToolPolicies(accessToken: string) {
+    return request<{ policies: ProjectToolPolicy[] }>('/project-tool-policies', {}, accessToken)
+  },
+
+  setProjectToolPolicy(project: string, disabled_tools: string[], accessToken: string) {
+    return request<ProjectToolPolicy>(
+      `/project-tool-policies/${encodeURIComponent(project)}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ disabled_tools }),
+      },
+      accessToken,
+    )
+  },
+
+  deleteProjectToolPolicy(project: string, accessToken: string) {
+    return request<{ ok: boolean; project: string }>(
+      `/project-tool-policies/${encodeURIComponent(project)}/delete`,
       { method: 'POST' },
       accessToken,
     )

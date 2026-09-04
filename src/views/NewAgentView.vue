@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '@/api/client'
+import { api, type ProjectToolPolicy } from '@/api/client'
 import { useAuth } from '@/auth'
 import { ApiError } from '@/api/client'
 import SystemPromptField from '@/components/SystemPromptField.vue'
@@ -15,6 +15,8 @@ const router = useRouter()
 const models = ref<string[]>([])
 const profiles = ref<string[]>([])
 const knownProjects = ref<string[]>([])
+const projectToolPolicies = ref<ProjectToolPolicy[]>([])
+const webSearchAvailable = ref(false)
 const runnerOnline = ref(false)
 const model = ref('')
 const profile = ref('workspace')
@@ -24,6 +26,7 @@ const projectNew = ref('')
 const prompt = ref('')
 const systemPrompt = ref('')
 const maxIterations = ref(8)
+const webSearchEnabled = ref(true)
 const showAdvanced = ref(false)
 const error = ref('')
 const loading = ref(false)
@@ -43,11 +46,34 @@ const projectValid = computed(() => {
   return name !== '' && PROJECT_RE.test(name)
 })
 
+const showWebSearchToggle = computed(
+  () =>
+    webSearchAvailable.value &&
+    (profile.value === 'web' || profile.value === 'workspace_web'),
+)
+
+const projectDisablesWebSearch = computed(() => {
+  const proj = selectedProject.value
+  if (!proj) return false
+  const row = projectToolPolicies.value.find((p) => p.project === proj)
+  return row?.disabled_tools.includes('web_search') ?? false
+})
+
+function defaultWebSearchEnabled() {
+  return !projectDisablesWebSearch.value
+}
+
 watch(needsProject, (needed) => {
   if (!needed) return
   if (knownProjects.value.length && !projectExisting.value) {
     projectExisting.value = knownProjects.value[0]
     projectMode.value = 'existing'
+  }
+})
+
+watch([selectedProject, profile, showWebSearchToggle], () => {
+  if (showWebSearchToggle.value) {
+    webSearchEnabled.value = defaultWebSearchEnabled()
   }
 })
 
@@ -61,6 +87,8 @@ async function loadModels() {
       api.listSystemPrompts(token).catch(() => null),
     ])
     runnerOnline.value = res.runner_online
+    webSearchAvailable.value = res.web_search_available ?? false
+    projectToolPolicies.value = res.project_tool_policies ?? []
     profiles.value = res.agent_profiles.length
       ? res.agent_profiles
       : ['workspace', 'web', 'workspace_web']
@@ -70,6 +98,7 @@ async function loadModels() {
     knownProjects.value = unionProjects(
       res.agent_projects ?? [],
       promptsRes?.project_defaults ?? [],
+      projectToolPolicies.value,
     )
     if (knownProjects.value.length) {
       projectExisting.value = knownProjects.value[0]
@@ -80,6 +109,9 @@ async function loadModels() {
     models.value = res.agent_models.length ? res.agent_models : res.models
     if (models.value.length && !model.value) {
       model.value = models.value[0]
+    }
+    if (showWebSearchToggle.value) {
+      webSearchEnabled.value = defaultWebSearchEnabled()
     }
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load models'
@@ -101,18 +133,19 @@ async function submit() {
 
   loading.value = true
   try {
-    const job = await api.createJob(
-      {
-        type: 'agent.task',
-        model: model.value,
-        prompt: prompt.value,
-        profile: profile.value,
-        project: needsProject.value ? selectedProject.value : undefined,
-        system_prompt: systemPrompt.value || undefined,
-        max_tool_iterations: maxIterations.value,
-      },
-      token,
-    )
+    const payload: Parameters<typeof api.createJob>[0] = {
+      type: 'agent.task',
+      model: model.value,
+      prompt: prompt.value,
+      profile: profile.value,
+      project: needsProject.value ? selectedProject.value : undefined,
+      system_prompt: systemPrompt.value || undefined,
+      max_tool_iterations: maxIterations.value,
+    }
+    if (showWebSearchToggle.value && !webSearchEnabled.value) {
+      payload.disabled_tools = ['web_search']
+    }
+    const job = await api.createJob(payload, token)
     router.push(`/jobs/${job.id}`)
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Failed to create job'
@@ -161,7 +194,7 @@ onMounted(loadModels)
         </select>
         <p class="muted">
           <code>workspace</code> — files in a project ·
-          <code>web</code> — public HTTP GET ·
+          <code>web</code> — public HTTP GET<span v-if="webSearchAvailable"> + search</span> ·
           <code>workspace_web</code> — both
         </p>
       </div>
@@ -203,6 +236,24 @@ onMounted(loadModels)
           Agent file tools only touch
           <code>~/ownrun-workspace/&lt;project&gt;/</code>.
           New names are created on the runner when the job starts.
+        </p>
+      </div>
+
+      <div v-if="showWebSearchToggle" class="form-group">
+        <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal">
+          <input v-model="webSearchEnabled" type="checkbox" />
+          Web search
+        </label>
+        <p v-if="projectDisablesWebSearch && webSearchEnabled" class="muted">
+          Project <code>{{ selectedProject }}</code> normally disables search; you enabled it for this job.
+        </p>
+        <p v-else-if="projectDisablesWebSearch" class="muted">
+          Project <code>{{ selectedProject }}</code> disables web search by default.
+          <router-link to="/prompts">Change in Prompts</router-link>
+        </p>
+        <p v-else class="muted">
+          Uses Ollama’s cloud search API (<code>OLLAMA_API_KEY</code> on the runner). Pages are read with
+          <code>http_fetch</code>.
         </p>
       </div>
 

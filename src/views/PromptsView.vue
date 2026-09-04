@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { api, ApiError, type ProjectPromptDefaults, type SystemPrompt, type SystemPromptAppliesTo } from '@/api/client'
+import { api, ApiError, type ProjectPromptDefaults, type ProjectToolPolicy, type SystemPrompt, type SystemPromptAppliesTo } from '@/api/client'
 import { useAuth } from '@/auth'
 import { promptAppliesTo, unionProjects } from '@/composables/useSystemPrompts'
 
@@ -12,6 +12,8 @@ const auth = useAuth()
 const prompts = ref<SystemPrompt[]>([])
 const defaults = ref({ chat_prompt_id: null as number | null, agent_prompt_id: null as number | null })
 const projectDefaults = ref<ProjectPromptDefaults[]>([])
+const projectToolPolicies = ref<ProjectToolPolicy[]>([])
+const webSearchAvailable = ref(false)
 const knownProjects = ref<string[]>([])
 
 const loading = ref(true)
@@ -31,8 +33,10 @@ const addProjectNew = ref('')
 const extraProjects = ref<string[]>([])
 
 const allProjects = computed(() =>
-  unionProjects(knownProjects.value, projectDefaults.value).concat(
-    extraProjects.value.filter((p) => !unionProjects(knownProjects.value, projectDefaults.value).includes(p)),
+  unionProjects(knownProjects.value, projectDefaults.value, projectToolPolicies.value).concat(
+    extraProjects.value.filter(
+      (p) => !unionProjects(knownProjects.value, projectDefaults.value, projectToolPolicies.value).includes(p),
+    ),
   ),
 )
 
@@ -60,6 +64,51 @@ function projectRow(project: string): ProjectPromptDefaults {
   )
 }
 
+function toolPolicyRow(project: string): ProjectToolPolicy {
+  return (
+    projectToolPolicies.value.find((r) => r.project === project) ?? {
+      project,
+      disabled_tools: [],
+    }
+  )
+}
+
+function projectAllowsWebSearch(project: string): boolean {
+  return !toolPolicyRow(project).disabled_tools.includes('web_search')
+}
+
+async function setProjectWebSearch(project: string, allowed: boolean) {
+  const token = auth.getAccessToken()
+  if (!token) return
+  actionError.value = ''
+  const row = toolPolicyRow(project)
+  let disabled = [...row.disabled_tools]
+  if (allowed) {
+    disabled = disabled.filter((id) => id !== 'web_search')
+  } else if (!disabled.includes('web_search')) {
+    disabled.push('web_search')
+  }
+  try {
+    if (disabled.length === 0 && row.disabled_tools.length === 0 && allowed) {
+      return
+    }
+    if (disabled.length === 0) {
+      await api.deleteProjectToolPolicy(project, token)
+      projectToolPolicies.value = projectToolPolicies.value.filter((r) => r.project !== project)
+    } else {
+      const saved = await api.setProjectToolPolicy(project, disabled, token)
+      const idx = projectToolPolicies.value.findIndex((r) => r.project === project)
+      if (idx >= 0) {
+        projectToolPolicies.value[idx] = saved
+      } else {
+        projectToolPolicies.value.push(saved)
+      }
+    }
+  } catch (e) {
+    actionError.value = e instanceof ApiError ? e.message : 'Failed to save tool policy'
+  }
+}
+
 async function load() {
   const token = auth.getAccessToken()
   if (!token) return
@@ -74,6 +123,15 @@ async function load() {
     defaults.value = bundle.defaults
     projectDefaults.value = bundle.project_defaults
     knownProjects.value = models?.agent_projects ?? []
+    webSearchAvailable.value = models?.web_search_available ?? false
+    if (webSearchAvailable.value) {
+      try {
+        const policies = await api.listProjectToolPolicies(token)
+        projectToolPolicies.value = policies.policies
+      } catch {
+        projectToolPolicies.value = models?.project_tool_policies ?? []
+      }
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load prompts'
   } finally {
@@ -294,6 +352,16 @@ onMounted(load)
             <option value="">None</option>
             <option v-for="p in agentOptions()" :key="p.id" :value="p.id">{{ p.name }}</option>
           </select>
+        </div>
+        <div v-if="webSearchAvailable" class="form-group">
+          <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal">
+            <input
+              type="checkbox"
+              :checked="projectAllowsWebSearch(proj)"
+              @change="setProjectWebSearch(proj, ($event.target as HTMLInputElement).checked)"
+            />
+            Allow web search for agents on this project
+          </label>
         </div>
       </div>
 

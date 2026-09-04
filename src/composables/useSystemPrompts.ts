@@ -180,9 +180,15 @@ export async function saveSystemPrompt(
 export function unionProjects(
   agentProjects: string[],
   projectDefaults: ProjectPromptDefaults[],
+  toolPolicies: { project: string }[] = [],
 ): string[] {
   const merged = [...agentProjects]
   for (const row of projectDefaults) {
+    if (row.project && !merged.includes(row.project)) {
+      merged.push(row.project)
+    }
+  }
+  for (const row of toolPolicies) {
     if (row.project && !merged.includes(row.project)) {
       merged.push(row.project)
     }
