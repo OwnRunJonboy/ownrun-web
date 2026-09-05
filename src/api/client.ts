@@ -86,6 +86,7 @@ export interface ModelsResponse {
   calendar_projects?: string[]
   journal_projects?: string[]
   task_projects?: string[]
+  kb_projects?: string[]
   timezone?: string
   web_search_available?: boolean
   agent_tool_ids?: string[]
@@ -96,6 +97,41 @@ export interface ProjectToolPolicy {
   project: string
   disabled_tools: string[]
   updated_at?: string
+}
+
+export type KbDocStatus = 'pending' | 'queued' | 'running' | 'ready' | 'failed' | 'deleting'
+
+export interface KnowledgeBase {
+  id: number
+  name: string
+  slug: string
+  project: string | null
+  description: string | null
+  document_count: number
+  ready_count: number
+  pending_count: number
+  failed_count: number
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface KbDocument {
+  id: number
+  kb_id: number
+  filename: string
+  content_type: string
+  format: 'pdf' | 'docx' | 'epub' | string
+  size_bytes: number
+  status: KbDocStatus
+  error_message: string | null
+  chunk_count: number | null
+  page_count: number | null
+  chapter_count: number | null
+  content_hash: string
+  ingest_job_id: number | null
+  embedding_model: string | null
+  created_at?: string | null
+  updated_at?: string | null
 }
 
 export interface CalendarEntry {
@@ -600,6 +636,95 @@ export const api = {
   deleteProjectToolPolicy(project: string, accessToken: string) {
     return request<{ ok: boolean; project: string }>(
       `/project-tool-policies/${encodeURIComponent(project)}/delete`,
+      { method: 'POST' },
+      accessToken,
+    )
+  },
+
+  listKnowledgeBases(params: { project?: string }, accessToken: string) {
+    const q = new URLSearchParams()
+    if (params.project !== undefined) q.set('project', params.project)
+    const qs = q.toString()
+    return request<{ bases: KnowledgeBase[] }>(`/kb${qs ? `?${qs}` : ''}`, {}, accessToken)
+  },
+
+  getKnowledgeBase(id: number, accessToken: string) {
+    return request<KnowledgeBase>(`/kb/${id}`, {}, accessToken)
+  },
+
+  createKnowledgeBase(
+    data: { name: string; slug?: string; project?: string | null; description?: string | null },
+    accessToken: string,
+  ) {
+    return request<KnowledgeBase>('/kb', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, accessToken)
+  },
+
+  updateKnowledgeBase(
+    id: number,
+    data: Partial<{ name: string; slug: string; project: string | null; description: string | null }>,
+    accessToken: string,
+  ) {
+    return request<KnowledgeBase>(`/kb/${id}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, accessToken)
+  },
+
+  deleteKnowledgeBase(id: number, accessToken: string) {
+    return request<{ ok: boolean; id: number }>(`/kb/${id}/delete`, { method: 'POST' }, accessToken)
+  },
+
+  rebuildKnowledgeBase(id: number, accessToken: string) {
+    return request<{ ok: boolean; queued: number; kb_id: number }>(
+      `/kb/${id}/rebuild`,
+      { method: 'POST' },
+      accessToken,
+    )
+  },
+
+  listKbDocuments(kbId: number, accessToken: string) {
+    return request<{ documents: KbDocument[] }>(`/kb/${kbId}/documents`, {}, accessToken)
+  },
+
+  async uploadKbDocument(kbId: number, file: File, accessToken: string) {
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+    }
+    if (accessToken) {
+      const bearer = `Bearer ${accessToken}`
+      headers['Authorization'] = bearer
+      headers['X-OwnRun-Authorization'] = bearer
+    }
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${API_BASE}/kb/${kbId}/documents`, {
+      method: 'POST',
+      headers,
+      body: form,
+    })
+    if (!res.ok) {
+      let message = res.statusText
+      try {
+        const body = await res.json()
+        if (body.error) message = body.error
+      } catch {
+        // ignore
+      }
+      throw new ApiError(message, res.status)
+    }
+    return res.json() as Promise<KbDocument>
+  },
+
+  reingestKbDocument(id: number, accessToken: string) {
+    return request<KbDocument>(`/kb/documents/${id}/reingest`, { method: 'POST' }, accessToken)
+  },
+
+  deleteKbDocument(id: number, accessToken: string) {
+    return request<{ ok: boolean; id: number }>(
+      `/kb/documents/${id}/delete`,
       { method: 'POST' },
       accessToken,
     )

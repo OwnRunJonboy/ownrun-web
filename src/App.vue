@@ -20,6 +20,7 @@ async function logout() {
         <RouterLink to="/calendar" class="btn">Calendar</RouterLink>
         <RouterLink to="/journal" class="btn">Journal</RouterLink>
         <RouterLink to="/tasks" class="btn">Tasks</RouterLink>
+        <RouterLink to="/knowledge" class="btn">Knowledge</RouterLink>
         <RouterLink to="/prompts" class="btn">Prompts</RouterLink>
         <RouterLink to="/jobs/new" class="btn">New chat</RouterLink>
         <RouterLink to="/jobs/new-agent" class="btn btn-primary">New agent</RouterLink>

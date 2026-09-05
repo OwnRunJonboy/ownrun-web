@@ -29,6 +29,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/knowledge',
+      name: 'knowledge',
+      component: () => import('@/views/KnowledgeView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/prompts',
       name: 'prompts',
       component: () => import('@/views/PromptsView.vue'),
