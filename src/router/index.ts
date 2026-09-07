@@ -59,6 +59,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/jobs/new-image',
+      name: 'new-image',
+      component: () => import('@/views/NewImageView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/jobs/:id',
       name: 'job-detail',
       component: () => import('@/views/JobDetailView.vue'),

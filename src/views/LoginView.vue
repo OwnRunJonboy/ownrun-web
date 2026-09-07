@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onUnmounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '@/auth'
 import { ApiError } from '@/api/client'
@@ -13,8 +13,22 @@ const password = ref('')
 const rememberMe = ref(false)
 const error = ref('')
 const loading = ref(false)
+const lockedUntil = ref(0)
+let unlockTimer: ReturnType<typeof setTimeout> | null = null
+
+const isLocked = computed(() => lockedUntil.value > Date.now())
+
+function armLockout(seconds: number) {
+  lockedUntil.value = Date.now() + seconds * 1000
+  if (unlockTimer) clearTimeout(unlockTimer)
+  unlockTimer = setTimeout(() => {
+    lockedUntil.value = 0
+    unlockTimer = null
+  }, seconds * 1000)
+}
 
 async function submit() {
+  if (isLocked.value) return
   error.value = ''
   loading.value = true
   try {
@@ -23,10 +37,17 @@ async function submit() {
     router.push(redirect)
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Login failed'
+    if (e instanceof ApiError && e.status === 429 && e.retryAfter) {
+      armLockout(e.retryAfter)
+    }
   } finally {
     loading.value = false
   }
 }
+
+onUnmounted(() => {
+  if (unlockTimer) clearTimeout(unlockTimer)
+})
 </script>
 
 <template>
@@ -50,11 +71,11 @@ async function submit() {
       <div class="form-group">
         <label>
           <input v-model="rememberMe" type="checkbox" />
-          Remember me
+          Remember me for 30 days
         </label>
       </div>
       <p v-if="error" class="error">{{ error }}</p>
-      <button type="submit" class="btn btn-primary" :disabled="loading">
+      <button type="submit" class="btn btn-primary" :disabled="loading || isLocked">
         {{ loading ? 'Signing in…' : 'Sign in' }}
       </button>
     </form>

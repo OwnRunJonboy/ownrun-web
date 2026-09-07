@@ -1,9 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { api, type AgentResult, type ChatMessage, type Job, type TraceStep } from '@/api/client'
+import {
+  api,
+  type AgentResult,
+  type ChatMessage,
+  type ImageJobResult,
+  type Job,
+  type TraceStep,
+} from '@/api/client'
 import { useAuth } from '@/auth'
 import { ApiError, saveSystemPrompt } from '@/composables/useSystemPrompts'
+
+const PHASE_LABELS: Record<string, string> = {
+  stopping_ollama: 'Stopping Ollama…',
+  starting_stable_diffusion: 'Starting Stable Diffusion…',
+  stopping_stable_diffusion: 'Stopping Stable Diffusion…',
+  starting_ollama: 'Starting Ollama…',
+  generating: 'Generating image…',
+  uploading: 'Uploading image…',
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -20,16 +36,25 @@ const savePromptError = ref('')
 const savePromptOk = ref('')
 const savingPrompt = ref(false)
 const showSavePrompt = ref(false)
+const imageUrls = ref<Record<number, string>>({})
+const lightboxId = ref<number | null>(null)
 
 let timer: ReturnType<typeof setInterval> | null = null
 
 const jobId = () => Number(route.params.id)
 
 const isAgent = computed(() => job.value?.type === 'agent.task')
+const isImage = computed(() => job.value?.type === 'stablediffusion.txt2img')
+
+const typeLabel = computed(() => {
+  if (isAgent.value) return 'agent'
+  if (isImage.value) return 'image'
+  return 'chat'
+})
 
 const systemPrompt = computed(() => {
   const current = job.value
-  if (!current) return ''
+  if (!current || isImage.value) return ''
   if (current.request.system_prompt) return current.request.system_prompt
   const first = current.request.messages?.[0]
   return first?.role === 'system' ? first.content : ''
@@ -44,17 +69,28 @@ const agentPayload = computed((): AgentResult | null => {
   return (current.result as AgentResult | null) || (current.progress as AgentResult | null)
 })
 
+const imageResult = computed((): ImageJobResult | null => {
+  const current = job.value
+  if (!current || !isImage.value) return null
+  return (current.result as ImageJobResult | null) || null
+})
+
+const progressPhase = computed(() => {
+  const p = job.value?.progress as { phase?: string } | null
+  return p?.phase ? PHASE_LABELS[p.phase] || p.phase : ''
+})
+
 const trace = computed((): TraceStep[] => agentPayload.value?.trace ?? [])
 
 const turns = computed((): ChatMessage[] => {
   const current = job.value
-  if (!current || isAgent.value) return []
+  if (!current || isAgent.value || isImage.value) return []
 
   const history = current.request.messages?.length
     ? current.request.messages.filter((m) => m.role === 'user' || m.role === 'assistant')
     : [{ role: 'user', content: current.request.prompt }]
 
-  if (current.status === 'succeeded' && current.result?.text != null) {
+  if (current.status === 'succeeded' && current.result && 'text' in current.result && current.result.text != null) {
     return [...history, { role: 'assistant', content: current.result.text }]
   }
   return history
@@ -69,6 +105,49 @@ function formatArgs(args: Record<string, unknown> | undefined) {
   }
 }
 
+function revokeImageUrls() {
+  for (const url of Object.values(imageUrls.value)) {
+    URL.revokeObjectURL(url)
+  }
+  imageUrls.value = {}
+}
+
+async function loadImages(current: Job) {
+  const token = auth.getAccessToken()
+  if (!token || current.type !== 'stablediffusion.txt2img') return
+  const result = current.result as ImageJobResult | null
+  const images = result?.images || []
+  if (!images.length) return
+
+  const next: Record<number, string> = { ...imageUrls.value }
+  for (const img of images) {
+    if (next[img.artifact_id]) continue
+    try {
+      const blob = await api.fetchArtifactBlob(current.id, img.artifact_id, token)
+      next[img.artifact_id] = URL.createObjectURL(blob)
+    } catch (e) {
+      console.warn('Failed to load artifact', img.artifact_id, e)
+    }
+  }
+  imageUrls.value = next
+}
+
+async function downloadImage(artifactId: number, filename: string) {
+  const token = auth.getAccessToken()
+  if (!token || !job.value) return
+  try {
+    const blob = await api.fetchArtifactBlob(job.value.id, artifactId, token)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    actionError.value = e instanceof Error ? e.message : 'Download failed'
+  }
+}
+
 async function load() {
   const token = auth.getAccessToken()
   if (!token) return
@@ -76,6 +155,9 @@ async function load() {
   try {
     job.value = await api.getJob(jobId(), token)
     error.value = ''
+    if (job.value?.type === 'stablediffusion.txt2img' && job.value.status === 'succeeded') {
+      await loadImages(job.value)
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load job'
   } finally {
@@ -158,6 +240,8 @@ function resetAndLoad() {
   error.value = ''
   actionError.value = ''
   continuePrompt.value = ''
+  lightboxId.value = null
+  revokeImageUrls()
   load()
 }
 
@@ -174,6 +258,7 @@ watch(() => route.params.id, resetAndLoad)
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
+  revokeImageUrls()
 })
 </script>
 
@@ -187,7 +272,7 @@ onUnmounted(() => {
     <template v-else-if="job">
       <h2>
         Job #{{ job.id }}
-        <span class="job-type">{{ isAgent ? 'agent' : 'chat' }}</span>
+        <span class="job-type">{{ typeLabel }}</span>
         <span class="status" :class="`status-${job.status}`">{{ job.status }}</span>
       </h2>
 
@@ -199,12 +284,37 @@ onUnmounted(() => {
       </p>
 
       <div class="card">
-        <p><strong>Model:</strong> {{ job.request.model }}</p>
+        <p v-if="job.request.model"><strong>Model:</strong> {{ job.request.model }}</p>
         <p v-if="job.request.profile"><strong>Profile:</strong> {{ job.request.profile }}</p>
         <p v-if="job.request.project"><strong>Project:</strong> {{ job.request.project }}</p>
         <p v-if="job.request.max_tool_iterations != null" class="muted">
           Max tool iterations: {{ job.request.max_tool_iterations }}
         </p>
+        <p
+          v-if="isAgent && (job.request.profile === 'web' || job.request.profile === 'workspace_web')"
+          class="muted"
+        >
+          HTTP fetch: {{ job.request.allow_http_fetch ? 'allowed' : 'off' }}
+        </p>
+        <template v-if="isImage">
+          <p style="white-space: pre-wrap"><strong>Prompt:</strong> {{ job.request.prompt }}</p>
+          <p v-if="job.request.negative_prompt" class="muted" style="white-space: pre-wrap">
+            <strong>Negative:</strong> {{ job.request.negative_prompt }}
+          </p>
+          <p class="muted">
+            {{ job.request.width }}×{{ job.request.height }}
+            · {{ job.request.steps }} steps
+            · CFG {{ job.request.cfg_scale }}
+            · seed {{ job.request.seed }}
+            · batch {{ job.request.batch_size }}
+          </p>
+          <p v-if="imageResult?.duration_ms != null" class="muted">
+            Generate {{ imageResult.duration_ms }} ms
+            <template v-if="imageResult.backend_switch_ms">
+              · switch {{ imageResult.backend_switch_ms }} ms
+            </template>
+          </p>
+        </template>
         <p v-if="agentPayload?.stop_reason && agentPayload.stop_reason !== 'completed'" class="muted">
           Stopped: {{ agentPayload.stop_reason }}
           <template v-if="agentPayload.iterations != null">
@@ -242,8 +352,51 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <!-- Image gallery -->
+      <div v-if="isImage" class="image-job">
+        <p
+          v-if="job.status === 'queued' || job.status === 'running'"
+          class="muted"
+        >
+          {{ progressPhase || 'Waiting for the runner…' }}
+        </p>
+        <div v-if="imageResult?.images?.length" class="image-gallery">
+          <figure
+            v-for="img in imageResult.images"
+            :key="img.artifact_id"
+            class="image-thumb"
+          >
+            <button
+              v-if="imageUrls[img.artifact_id]"
+              type="button"
+              class="image-thumb-btn"
+              @click="lightboxId = img.artifact_id"
+            >
+              <img :src="imageUrls[img.artifact_id]" :alt="img.filename" />
+            </button>
+            <p v-else class="muted">Loading {{ img.filename }}…</p>
+            <figcaption>
+              <button
+                type="button"
+                class="btn"
+                @click="downloadImage(img.artifact_id, img.filename)"
+              >
+                Download
+              </button>
+            </figcaption>
+          </figure>
+        </div>
+        <div
+          v-if="lightboxId != null && imageUrls[lightboxId]"
+          class="image-lightbox"
+          @click.self="lightboxId = null"
+        >
+          <img :src="imageUrls[lightboxId]" alt="" />
+        </div>
+      </div>
+
       <!-- Chat transcript -->
-      <div v-if="!isAgent" class="chat">
+      <div v-else-if="!isAgent" class="chat">
         <div
           v-for="(turn, index) in turns"
           :key="index"
@@ -330,7 +483,7 @@ onUnmounted(() => {
       </div>
 
       <form
-        v-if="job.status === 'succeeded'"
+        v-if="job.status === 'succeeded' && !isImage"
         class="continue-form"
         @submit.prevent="continueChat"
       >

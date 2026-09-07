@@ -26,6 +26,75 @@ export interface AuthTokens {
   expires_in: number
 }
 
+export interface AuthSessionHooks {
+  getRefreshToken: () => string | null
+  applyTokens: (tokens: AuthTokens) => void
+  onAuthLost: () => void
+}
+
+let sessionHooks: AuthSessionHooks | null = null
+let refreshInFlight: Promise<string | null> | null = null
+
+export function registerAuthSession(hooks: AuthSessionHooks): void {
+  sessionHooks = hooks
+}
+
+function isAuthPath(path: string): boolean {
+  return path === '/auth/login' || path === '/auth/refresh' || path === '/auth/logout'
+}
+
+export async function refreshAccessToken(): Promise<string | null> {
+  if (!sessionHooks) {
+    return null
+  }
+  if (refreshInFlight) {
+    return refreshInFlight
+  }
+
+  refreshInFlight = (async () => {
+    const refresh = sessionHooks!.getRefreshToken()
+    if (!refresh) {
+      return null
+    }
+    try {
+      const tokens = await request<AuthTokens>('/auth/refresh', {
+        method: 'POST',
+        body: JSON.stringify({ refresh_token: refresh }),
+      })
+      sessionHooks!.applyTokens(tokens)
+      return tokens.access_token
+    } catch {
+      sessionHooks!.onAuthLost()
+      return null
+    }
+  })().finally(() => {
+    refreshInFlight = null
+  })
+
+  return refreshInFlight
+}
+
+async function fetchWithAuthRetry(
+  url: string,
+  init: RequestInit,
+  accessToken: string,
+): Promise<Response> {
+  const headersFor = (token: string): Record<string, string> => ({
+    ...((init.headers as Record<string, string> | undefined) ?? {}),
+    Authorization: `Bearer ${token}`,
+    'X-OwnRun-Authorization': `Bearer ${token}`,
+  })
+
+  let res = await fetch(url, { ...init, headers: headersFor(accessToken) })
+  if (res.status === 401) {
+    const next = await refreshAccessToken()
+    if (next) {
+      res = await fetch(url, { ...init, headers: headersFor(next) })
+    }
+  }
+  return res
+}
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | string
   content: string
@@ -57,7 +126,7 @@ export interface Job {
   type: string
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
   request: {
-    model: string
+    model?: string
     prompt: string
     system_prompt?: string
     messages?: ChatMessage[]
@@ -66,14 +135,52 @@ export interface Job {
     project?: string
     max_tool_iterations?: number
     disabled_tools?: string[]
+    allow_http_fetch?: boolean
+    negative_prompt?: string
+    width?: number
+    height?: number
+    steps?: number
+    cfg_scale?: number
+    seed?: number
+    batch_size?: number
   }
-  result: AgentResult | { text?: string; model?: string; duration_ms?: number } | null
-  progress: AgentResult | null
+  result:
+    | AgentResult
+    | { text?: string; model?: string; duration_ms?: number }
+    | ImageJobResult
+    | null
+  progress: (AgentResult & { phase?: string }) | { phase?: string } | null
   error_message: string | null
   created_at: string
   queued_at: string
   claimed_at: string | null
   finished_at: string | null
+}
+
+export interface ImageJobResult {
+  seed?: number
+  model?: string
+  width?: number
+  height?: number
+  steps?: number
+  cfg_scale?: number
+  duration_ms?: number
+  backend_switch_ms?: number
+  images?: Array<{
+    artifact_id: number
+    filename: string
+    content_type: string
+  }>
+}
+
+export interface JobArtifact {
+  id: number
+  job_id: number
+  kind: string
+  filename: string
+  content_type: string
+  size_bytes: number
+  created_at?: string | null
 }
 
 export interface ModelsResponse {
@@ -91,6 +198,10 @@ export interface ModelsResponse {
   web_search_available?: boolean
   agent_tool_ids?: string[]
   project_tool_policies?: ProjectToolPolicy[]
+  backend_state?: string | null
+  sd_available?: boolean
+  sd_models?: string[]
+  ollama_models_stale?: boolean
 }
 
 export interface ProjectToolPolicy {
@@ -245,6 +356,7 @@ class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
+    public retryAfter?: number,
   ) {
     super(message)
   }
@@ -254,6 +366,7 @@ async function request<T>(
   path: string,
   options: RequestInit = {},
   accessToken?: string | null,
+  retried = false,
 ): Promise<T> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
@@ -272,15 +385,26 @@ async function request<T>(
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers })
 
+  if (res.status === 401 && !retried && !isAuthPath(path)) {
+    const next = await refreshAccessToken()
+    if (next) {
+      return request<T>(path, options, next, true)
+    }
+  }
+
   if (!res.ok) {
     let message = res.statusText
+    let retryAfter: number | undefined
     try {
       const body = await res.json()
       if (body.error) message = body.error
+      if (typeof body.retry_after === 'number' && body.retry_after > 0) {
+        retryAfter = body.retry_after
+      }
     } catch {
       // ignore
     }
-    throw new ApiError(message, res.status)
+    throw new ApiError(message, res.status, retryAfter)
   }
 
   if (res.status === 204) {
@@ -322,14 +446,22 @@ export const api = {
 
   createJob(
     data: {
-      type?: 'ollama.chat' | 'agent.task'
-      model: string
+      type?: 'ollama.chat' | 'agent.task' | 'stablediffusion.txt2img'
+      model?: string
       prompt: string
       system_prompt?: string
       profile?: string
       project?: string
       max_tool_iterations?: number
       disabled_tools?: string[]
+      allow_http_fetch?: boolean
+      negative_prompt?: string
+      width?: number
+      height?: number
+      steps?: number
+      cfg_scale?: number
+      seed?: number
+      batch_size?: number
     },
     accessToken: string,
   ) {
@@ -337,6 +469,38 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }, accessToken)
+  },
+
+  listJobArtifacts(jobId: number, accessToken: string) {
+    return request<{ artifacts: JobArtifact[] }>(
+      `/jobs/${jobId}/artifacts`,
+      {},
+      accessToken,
+    )
+  },
+
+  artifactUrl(jobId: number, artifactId: number, download = false): string {
+    const q = download ? '?download=1' : ''
+    return `${API_BASE}/jobs/${jobId}/artifacts/${artifactId}${q}`
+  },
+
+  async fetchArtifactBlob(
+    jobId: number,
+    artifactId: number,
+    accessToken: string,
+  ): Promise<Blob> {
+    const resp = await fetchWithAuthRetry(this.artifactUrl(jobId, artifactId), {}, accessToken)
+    if (!resp.ok) {
+      let message = `HTTP ${resp.status}`
+      try {
+        const data = await resp.json()
+        if (data?.error) message = data.error
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(message, resp.status)
+    }
+    return resp.blob()
   },
 
   cancelJob(id: number, accessToken: string) {
@@ -690,21 +854,17 @@ export const api = {
   },
 
   async uploadKbDocument(kbId: number, file: File, accessToken: string) {
-    const headers: Record<string, string> = {
-      Accept: 'application/json',
-    }
-    if (accessToken) {
-      const bearer = `Bearer ${accessToken}`
-      headers['Authorization'] = bearer
-      headers['X-OwnRun-Authorization'] = bearer
-    }
     const form = new FormData()
     form.append('file', file)
-    const res = await fetch(`${API_BASE}/kb/${kbId}/documents`, {
-      method: 'POST',
-      headers,
-      body: form,
-    })
+    const res = await fetchWithAuthRetry(
+      `${API_BASE}/kb/${kbId}/documents`,
+      {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        body: form,
+      },
+      accessToken,
+    )
     if (!res.ok) {
       let message = res.statusText
       try {

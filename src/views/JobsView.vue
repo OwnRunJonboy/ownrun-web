@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { api, type Job, type JournalEntry, type Task } from '@/api/client'
 import { useAuth } from '@/auth'
@@ -8,6 +8,7 @@ const auth = useAuth()
 const router = useRouter()
 const jobs = ref<Job[]>([])
 const runnerOnline = ref(false)
+const backendState = ref<string | null>(null)
 const error = ref('')
 const loading = ref(true)
 const memoryEntry = ref<JournalEntry | null>(null)
@@ -36,6 +37,19 @@ function formatMemoryDate(ymd: string): string {
   })
 }
 
+const backendHint = computed(() => {
+  switch (backendState.value) {
+    case 'switching':
+      return 'Switching GPU backends…'
+    case 'active_sd':
+      return 'GPU: Stable Diffusion'
+    case 'failed':
+      return 'Backend gate failed'
+    default:
+      return ''
+  }
+})
+
 async function load() {
   const token = auth.getAccessToken()
   if (!token) return
@@ -49,6 +63,7 @@ async function load() {
     ])
     jobs.value = jobsRes.jobs
     runnerOnline.value = modelsRes.runner_online
+    backendState.value = modelsRes.backend_state ?? null
     if (memoryRes?.entry) {
       memoryEntry.value = memoryRes.entry
       memoryLabel.value = memoryRes.memory_label
@@ -95,7 +110,10 @@ function formatTime(iso: string | null) {
 }
 
 function typeLabel(type: string) {
-  return type === 'agent.task' ? 'agent' : 'chat'
+  if (type === 'agent.task') return 'agent'
+  if (type === 'stablediffusion.txt2img') return 'image'
+  if (type.startsWith('kb.')) return 'kb'
+  return 'chat'
 }
 
 onMounted(() => {
@@ -119,6 +137,9 @@ onUnmounted(() => {
         Runner {{ runnerOnline ? 'online' : 'offline' }}
       </span>
     </div>
+    <p v-if="backendHint" class="muted" style="margin-top: -0.5rem; margin-bottom: 1rem">
+      {{ backendHint }}
+    </p>
 
     <RouterLink
       v-if="dueOverdue > 0 || dueTodayCount > 0"

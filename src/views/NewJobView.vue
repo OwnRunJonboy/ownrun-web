@@ -15,6 +15,7 @@ const router = useRouter()
 const models = ref<string[]>([])
 const knownProjects = ref<string[]>([])
 const runnerOnline = ref(false)
+const ollamaModelsStale = ref(false)
 const model = ref('')
 const prompt = ref('')
 const systemPrompt = ref('')
@@ -48,6 +49,7 @@ async function loadModels() {
     ])
     models.value = res.models
     runnerOnline.value = res.runner_online
+    ollamaModelsStale.value = !!res.ollama_models_stale
     knownProjects.value = unionProjects(
       res.agent_projects ?? [],
       promptsRes?.project_defaults ?? [],
@@ -112,6 +114,9 @@ onMounted(loadModels)
     </p>
     <p v-if="!runnerOnline" class="muted">
       The runner is offline. Jobs will queue until it comes back.
+    </p>
+    <p v-else-if="ollamaModelsStale" class="muted">
+      Ollama model list may be stale (GPU is on Stable Diffusion).
     </p>
 
     <form @submit.prevent="submit">

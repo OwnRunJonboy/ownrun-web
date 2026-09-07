@@ -27,6 +27,7 @@ const prompt = ref('')
 const systemPrompt = ref('')
 const maxIterations = ref(8)
 const webSearchEnabled = ref(true)
+const allowHttpFetch = ref(false)
 const showAdvanced = ref(false)
 const error = ref('')
 const loading = ref(false)
@@ -52,11 +53,22 @@ const showWebSearchToggle = computed(
     (profile.value === 'web' || profile.value === 'workspace_web'),
 )
 
+const showHttpFetchToggle = computed(
+  () => profile.value === 'web' || profile.value === 'workspace_web',
+)
+
 const projectDisablesWebSearch = computed(() => {
   const proj = selectedProject.value
   if (!proj) return false
   const row = projectToolPolicies.value.find((p) => p.project === proj)
   return row?.disabled_tools.includes('web_search') ?? false
+})
+
+const projectDisablesHttpFetch = computed(() => {
+  const proj = selectedProject.value
+  if (!proj) return false
+  const row = projectToolPolicies.value.find((p) => p.project === proj)
+  return row?.disabled_tools.includes('http_fetch') ?? false
 })
 
 function defaultWebSearchEnabled() {
@@ -75,6 +87,10 @@ watch([selectedProject, profile, showWebSearchToggle], () => {
   if (showWebSearchToggle.value) {
     webSearchEnabled.value = defaultWebSearchEnabled()
   }
+})
+
+watch(projectDisablesHttpFetch, (disabled) => {
+  if (disabled) allowHttpFetch.value = false
 })
 
 async function loadModels() {
@@ -145,6 +161,9 @@ async function submit() {
     if (showWebSearchToggle.value && !webSearchEnabled.value) {
       payload.disabled_tools = ['web_search']
     }
+    if (showHttpFetchToggle.value) {
+      payload.allow_http_fetch = allowHttpFetch.value && !projectDisablesHttpFetch.value
+    }
     const job = await api.createJob(payload, token)
     router.push(`/jobs/${job.id}`)
   } catch (e) {
@@ -194,8 +213,8 @@ onMounted(loadModels)
         </select>
         <p class="muted">
           <code>workspace</code> — files in a project ·
-          <code>web</code> — public HTTP GET<span v-if="webSearchAvailable"> + search</span> ·
-          <code>workspace_web</code> — both
+          <code>web</code> — search and personal tools; HTTP fetch off unless you opt in ·
+          <code>workspace_web</code> — files plus the same; HTTP fetch off unless you opt in
         </p>
       </div>
 
@@ -252,8 +271,23 @@ onMounted(loadModels)
           <router-link to="/prompts">Change in Prompts</router-link>
         </p>
         <p v-else class="muted">
-          Uses Ollama’s cloud search API (<code>OLLAMA_API_KEY</code> on the runner). Pages are read with
-          <code>http_fetch</code>.
+          Uses Ollama’s cloud search API (<code>OLLAMA_API_KEY</code> on the runner). Returns titles and
+          snippets. Full pages need HTTP fetch below.
+        </p>
+      </div>
+
+      <div v-if="showHttpFetchToggle" class="form-group">
+        <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal">
+          <input v-model="allowHttpFetch" type="checkbox" :disabled="projectDisablesHttpFetch" />
+          Allow HTTP fetch
+        </label>
+        <p v-if="projectDisablesHttpFetch" class="muted">
+          Project <code>{{ selectedProject }}</code> disables <code>http_fetch</code>.
+          <router-link to="/prompts">Change in Prompts</router-link>
+        </p>
+        <p v-else class="muted">
+          Off by default. When on, the agent can GET public URLs while journal, calendar, and task
+          tools are also available. A fetched page can instruct the model to send that data out.
         </p>
       </div>
 

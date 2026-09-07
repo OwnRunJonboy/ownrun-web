@@ -23,6 +23,7 @@ async function logout() {
         <RouterLink to="/knowledge" class="btn">Knowledge</RouterLink>
         <RouterLink to="/prompts" class="btn">Prompts</RouterLink>
         <RouterLink to="/jobs/new" class="btn">New chat</RouterLink>
+        <RouterLink to="/jobs/new-image" class="btn">New image</RouterLink>
         <RouterLink to="/jobs/new-agent" class="btn btn-primary">New agent</RouterLink>
         <button type="button" class="btn" @click="logout">Logout</button>
       </nav>
