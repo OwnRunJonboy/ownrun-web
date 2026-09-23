@@ -361,13 +361,13 @@ onUnmounted(() => {
             <input
               ref="fileInput"
               type="file"
-              accept=".pdf,.docx,.epub,application/pdf,application/epub+zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              accept=".pdf,.docx,.epub,.md,.markdown,.txt,application/pdf,application/epub+zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/x-markdown,text/plain"
               multiple
               hidden
               @change="onFilesSelected"
             />
           </div>
-          <p class="muted">PDF, DOCX, or EPUB. Agents search this corpus with kb_search.</p>
+          <p class="muted">PDF, DOCX, EPUB, Markdown, or TXT. Agents search this corpus with kb_search.</p>
           <p v-if="loadingDocs" class="muted">Loading documents…</p>
           <p v-else-if="!documents.length" class="muted">No documents yet.</p>
           <div v-for="doc in documents" :key="doc.id" class="card journal-row">

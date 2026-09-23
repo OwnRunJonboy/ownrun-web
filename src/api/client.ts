@@ -231,7 +231,7 @@ export interface KbDocument {
   kb_id: number
   filename: string
   content_type: string
-  format: 'pdf' | 'docx' | 'epub' | string
+  format: 'pdf' | 'docx' | 'epub' | 'md' | 'txt' | string
   size_bytes: number
   status: KbDocStatus
   error_message: string | null
