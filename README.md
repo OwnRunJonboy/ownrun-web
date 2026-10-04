@@ -28,3 +28,7 @@ If the API is not at `/api/index.php` on the same host, build with `VITE_API_BAS
 - Create Ollama text jobs with model selector
 - Job detail with polling while queued/running
 - Cancel queued jobs; requeue failed jobs
+
+## License
+
+OwnRun is distributed under the [GNU Affero General Public License v3](COPYING.txt) (AGPL-3.0).
